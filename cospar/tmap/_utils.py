@@ -13,6 +13,26 @@ from .. import settings
 from .. import tool as tl
 
 
+import h5py
+def save_h5(filename,matrix):
+    with h5py.File(filename, 'w') as f:
+        g = f.create_group('matrix')
+        g.create_dataset('data', data=matrix.data)
+        g.create_dataset('indices', data=matrix.indices)
+        g.create_dataset('indptr', data=matrix.indptr)
+        g.attrs['shape'] = matrix.shape
+
+def load_h5(filename):
+    with h5py.File(filename, 'r') as f:
+        g = f['matrix']
+        data = g['data'][:]
+        indices = g['indices'][:]
+        indptr = g['indptr'][:]
+        shape = g.attrs['shape']
+    
+    return ssp.csr_matrix((data, indices, indptr), shape=shape)
+
+
 def generate_similarity_matrix(
     adata,
     file_name,
@@ -65,12 +85,12 @@ def generate_similarity_matrix(
         similarity_matrix: `sp.spmatrix`
     """
 
-    if os.path.exists(file_name + f"_SM{round_of_smooth}.npz") and (
+    if os.path.exists(file_name + f"_SM{round_of_smooth}.h5") and (
         not compute_new_Smatrix
     ):
 
         logg.hint("Compute similarity matrix: load existing data")
-        similarity_matrix = ssp.load_npz(file_name + f"_SM{round_of_smooth}.npz")
+        similarity_matrix = load_h5(file_name + f"_SM{round_of_smooth}.h5")
     else:  # compute now
 
         logg.hint(f"Compute similarity matrix: computing new; beta={beta}")
@@ -101,7 +121,7 @@ def generate_similarity_matrix(
         if round_of_smooth == 0:
             SM = 0
             similarity_matrix = ssp.csr_matrix(similarity_matrix)
-            ssp.save_npz(file_name + f"_SM{SM}.npz", similarity_matrix)
+            save_h5(file_name + f"_SM{SM}.h5", similarity_matrix)
 
         for iRound in range(round_of_smooth):
             SM = iRound + 1
@@ -117,7 +137,7 @@ def generate_similarity_matrix(
             logg.hint("Time elapsed:", time.time() - t)
 
             t = time.time()
-            sparsity_frac = (similarity_matrix > 0).sum() / (
+            sparsity_frac = similarity_matrix.nnz / (
                 similarity_matrix.shape[0] * similarity_matrix.shape[1]
             )
             if sparsity_frac >= 0.1:
@@ -128,7 +148,7 @@ def generate_similarity_matrix(
                 similarity_matrix = hf.matrix_row_or_column_thresholding(
                     similarity_matrix, truncation_threshold
                 )
-                sparsity_frac_2 = (similarity_matrix > 0).sum() / (
+                sparsity_frac_2 = similarity_matrix.nnz / (
                     similarity_matrix.shape[0] * similarity_matrix.shape[1]
                 )
                 # similarity_matrix_truncate_array.append(similarity_matrix_truncate)
@@ -152,11 +172,11 @@ def generate_similarity_matrix(
                 if SM % 5 == 0:  # save when SM=5,10,15,20,...
 
                     logg.hint("Save the matrix at every 5 rounds")
-                    ssp.save_npz(file_name + f"_SM{SM}.npz", similarity_matrix)
+                    save_h5(file_name + f"_SM{SM}.h5", similarity_matrix)
             else:  # save all
 
                 logg.hint("Save the matrix at every round")
-                ssp.save_npz(file_name + f"_SM{SM}.npz", similarity_matrix)
+                save_h5(file_name + f"_SM{SM}.h5", similarity_matrix)
 
     return similarity_matrix
 
@@ -184,10 +204,6 @@ def generate_initial_similarity(similarity_matrix, initial_index_0, initial_inde
 
     t = time.time()
     initial_similarity = similarity_matrix[initial_index_0][:, initial_index_1]
-    # initial_similarity=hf.sparse_column_multiply(initial_similarity,1/(resol+initial_similarity.sum(0)))
-    if ssp.issparse(initial_similarity):
-        initial_similarity = initial_similarity.A
-
     logg.hint("Time elapsed: ", time.time() - t)
     return initial_similarity
 
@@ -215,8 +231,6 @@ def generate_final_similarity(similarity_matrix, final_index_0, final_index_1):
 
     t = time.time()
     final_similarity = similarity_matrix.T[final_index_0][:, final_index_1]
-    if ssp.issparse(final_similarity):
-        final_similarity = final_similarity.A
     # final_similarity=hf.sparse_rowwise_multiply(final_similarity,1/(resol+final_similarity.sum(1)))
 
     logg.hint("Time elapsed: ", time.time() - t)

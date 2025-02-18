@@ -72,7 +72,7 @@ def refine_Tmap_through_cospar(
     resol = 10 ** (-10)
     transition_map = hf.matrix_row_or_column_thresholding(
         transition_map, sparsity_threshold, row_threshold=True
-    )
+    ).toarray()
 
     if normalization_mode == 0:
         logg.hint("Single-cell normalization")
@@ -149,12 +149,12 @@ def refine_Tmap_through_cospar(
     temp = new_coupling_matrix * final_similarity
 
     logg.hint("Phase I: time elapsed -- ", time.time() - t)
-    smoothed_new_transition_map = initial_similarity.dot(temp)
+    smoothed_new_transition_map = ssp.csr_matrix(initial_similarity.dot(temp))
 
     logg.hint("Phase II: time elapsed -- ", time.time() - t)
 
     # both return are numpy array
-    un_SM_transition_map = new_coupling_matrix.A
+    un_SM_transition_map = new_coupling_matrix
     return smoothed_new_transition_map, un_SM_transition_map
 
 
@@ -400,7 +400,7 @@ def infer_Tmap_from_multitime_clones_private(
             f"{data_des}_Similarity_matrix_with_all_cell_states_kNN{neighbor_N}_Truncate{temp_str}",
         )
         for round_of_smooth in smooth_array:
-            if not os.path.exists(similarity_file_name + f"_SM{round_of_smooth}.npz"):
+            if not os.path.exists(similarity_file_name + f"_SM{round_of_smooth}.h5"):
                 raise ValueError(
                     f"Similarity matrix at given parameters have not been computed before! File name: {similarity_file_name}\n"
                     "Please re-run the function with: compute_new=True. If you want to use smooth round not the multiples of 5, set save_subset=False"
@@ -510,7 +510,7 @@ def infer_Tmap_from_multitime_clones_private(
         final_similarity_array_ext = adata.uns["Smatrix"]["final_similarity_array_ext"]
 
     #### Compute the core of the transition map that involve multi-time clones, then extend to other cell states
-    transition_map = np.ones((len(clonal_cell_id_t1), len(clonal_cell_id_t2)))
+    transition_map = ssp.csr_matrix(np.ones((len(clonal_cell_id_t1), len(clonal_cell_id_t2))))
     # transition_map_array=[transition_map_v1]
 
     X_clone = clone_annot.copy()
@@ -524,13 +524,13 @@ def infer_Tmap_from_multitime_clones_private(
         if j < len(smooth_array):
 
             logg.info(f"Iteration {j+1}, Use smooth_round={smooth_array[j]}")
-            used_initial_similarity = initial_similarity_array[j]
-            used_final_similarity = final_similarity_array[j]
+            used_initial_similarity = initial_similarity_array[j].toarray()
+            used_final_similarity = final_similarity_array[j].toarray()
         else:
 
             logg.info(f"Iteration {j+1}, Use smooth_round={smooth_array[-1]}")
-            used_initial_similarity = initial_similarity_array[-1]
-            used_final_similarity = final_similarity_array[-1]
+            used_initial_similarity = initial_similarity_array[-1].toarray()
+            used_final_similarity = final_similarity_array[-1].toarray()
 
         transition_map_new, unSM_sc_coupling = refine_Tmap_through_cospar(
             multiTime_cell_id_t1,
@@ -586,13 +586,13 @@ def infer_Tmap_from_multitime_clones_private(
             j + 1 >= len(smooth_array)
         ):  # only perform convergency test after at least 3 iterations
             verbose = logg._settings_verbosity_greater_or_equal_than(3)
-            corr_X = np.diag(hf.corr2_coeff(X_map_0, X_map_1)).mean()
+            corr_X = np.diag(hf.corr2_coeff(X_map_0.toarray(), X_map_1.toarray())).mean()
             if verbose:
                 from matplotlib import pyplot as plt
 
                 fig = plt.figure()
                 ax = plt.subplot(1, 1, 1)
-                ax.plot(X_map_0.flatten(), X_map_1.flatten(), ".r")
+                ax.plot(X_map_0.toarray().flatten(), X_map_1.toarray().flatten(), ".r")
                 ax.set_xlabel("$T_{ij}$: previous iteration")
                 ax.set_ylabel("$T_{ij}$: current iteration")
                 ax.set_title(f"CoSpar, iter_N={j+1}, R={int(100*corr_X)/100}")
@@ -625,11 +625,11 @@ def infer_Tmap_from_multitime_clones_private(
         )
 
         if j < len(smooth_array):
-            used_initial_similarity_ext = initial_similarity_array_ext[j]
-            used_final_similarity_ext = final_similarity_array_ext[j]
+            used_initial_similarity_ext = initial_similarity_array_ext[j].toarray()
+            used_final_similarity_ext = final_similarity_array_ext[j].toarray()
         else:
-            used_initial_similarity_ext = initial_similarity_array_ext[-1]
-            used_final_similarity_ext = final_similarity_array_ext[-1]
+            used_initial_similarity_ext = initial_similarity_array_ext[-1].toarray()
+            used_final_similarity_ext = final_similarity_array_ext[-1].toarray()
 
         unSM_sc_coupling = ssp.csr_matrix(unSM_sc_coupling)
         t = time.time()
@@ -641,7 +641,7 @@ def infer_Tmap_from_multitime_clones_private(
         logg.hint("Phase II: time elapsed -- ", time.time() - t)
 
         transition_map_1 = hf.matrix_row_or_column_thresholding(
-            transition_map_1, threshold=trunca_threshold[1], row_threshold=True
+            ssp.csr_matrix(transition_map_1), threshold=trunca_threshold[1], row_threshold=True
         )
         adata.uns["transition_map"] = ssp.csr_matrix(transition_map_1)
 
@@ -1477,11 +1477,8 @@ def infer_Tmap_from_optimal_transport(
             raise ValueError("Unknown solver")
 
         OT_transition_map = hf.matrix_row_or_column_thresholding(
-            OT_transition_map, threshold=0.01
+            ssp.csr_matrix(OT_transition_map), threshold=0.01
         )
-        if not ssp.issparse(OT_transition_map):
-            OT_transition_map = ssp.csr_matrix(OT_transition_map)
-        # ssp.save_npz(CustomOT_file_name, OT_transition_map)
 
         logg.info(
             f"Finishing computing optial transport map, used time {time.time()-t}"

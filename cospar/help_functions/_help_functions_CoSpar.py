@@ -195,42 +195,20 @@ def sparse_column_multiply(E, a):
         return ssp.csr_matrix(E) * w
 
 
-# This is faster than v0
-def matrix_row_or_column_thresholding(input_matrix, threshold=0.1, row_threshold=True):
-    """
-    Row or column-wise thresholding a matrix
+# This is much faster as it does not densify anything
+def matrix_row_or_column_thresholding(input_matrix,threshold=0.1, row_threshold=True):
+    max_vector = np.max(input_matrix, int(row_threshold)).toarray()
+    rows, cols = input_matrix.nonzero()
+    data = input_matrix.data
 
-    Set entries in a given row (column) to be zero, if its value is below threshold*max(row_vector).
-
-    Parameters
-    ----------
-    input_matrix: `np.array`
-    threshold: `float`, optional (default: 0.1)
-    row_threshold: `bool`, optional (default: True)
-        If true, perform row-wise thresholding; otherwise, column-wise.
-
-    Returns
-    -------
-    Rescaled np.array matrix
-    """
-
-    # print("V1")
-    # t1=time.time()
-    if ssp.issparse(input_matrix):
-        input_matrix = input_matrix.A
-        # print("Turn the sparse matrix into numpy array")
-        # print(f"Time-1: {time.time()-t1}")
-
-    max_vector = np.max(input_matrix, int(row_threshold))
-    for j in range(len(max_vector)):
-        if row_threshold:
-            idx = input_matrix[j, :] < threshold * max_vector[j]
-            input_matrix[j, idx] = 0
-        else:
-            idx = input_matrix[:, j] < threshold * max_vector[j]
-            input_matrix[idx, j] = 0
-    # print(f"matrix_row_or_column_thresholding time:{time.time()-t1}")
-    return input_matrix
+    if row_threshold:
+        mask = data >= (threshold*max_vector.ravel())[rows]
+    else:
+        mask = data >= (threshold*max_vector.ravel())[cols]
+    rows_kept = rows[mask]
+    cols_kept = cols[mask]
+    data_kept = data[mask]
+    return ssp.csr_matrix((data_kept, (rows_kept, cols_kept)), shape=input_matrix.shape)
 
 
 # This is slower due to a step of copying
